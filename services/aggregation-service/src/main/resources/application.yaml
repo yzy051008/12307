@@ -1,0 +1,102 @@
+server:
+  port: 9005
+
+spring:
+  application:
+    name: index12306-aggregation${unique-name:}-service
+  datasource:
+    driver-class-name: org.apache.shardingsphere.driver.ShardingSphereDriver
+    url: jdbc:shardingsphere:classpath:shardingsphere-config-${database.emv:dev}.yaml?placeholder-type=environment
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        server-addr: ${spring.cloud.nacos.discovery.server-addr}
+        import-check:
+          enabled: false
+      username: nacos
+      password: nacos
+    sentinel:
+      transport:
+        dashboard: localhost:8686
+        port: 8719
+  dynamic:
+    thread-pool:
+      nacos:
+        data-id: hippo4j-nacos.yaml
+        group: DEFAULT_GROUP
+      config-file-type: yml
+      executors:
+        - thread-pool-id: 'select-seat-thread-pool-executor'
+          alarm: false
+          allow-core-thread-time-out: true
+          blocking-queue: SynchronousQueue
+          core-pool-size: 20
+          maximum-pool-size: 40
+          keep-alive-time: 9999
+          rejected-handler: CallerRunsPolicy
+
+  main:
+    allow-bean-definition-overriding: true
+
+# 启用RocketMQ，因为您已经启动了RocketMQ服务
+rocketmq:
+  name-server: 127.0.0.1:9876
+  producer:
+    group: index12306_aggregation-service_common-message-execute_pg
+    send-message-timeout: 2000
+    retry-times-when-send-failed: 1
+    retry-times-when-send-async-failed: 1
+  # 启用RocketMQ
+  enabled: true
+
+pay:
+  alipay:
+    alipay-public-key: ${PAY_ALIPAY_PUBLIC_KEY:}
+    app-id: ${PAY_ALIPAY_APP_ID:}
+    charset: UTF8
+    format: json
+    notify-url: ${PAY_ALIPAY_NOTIFY_URL:http://localhost:8080/api/pay-service/callback/alipay}
+    private-key: ${PAY_ALIPAY_PRIVATE_KEY:}
+    server-url: ${PAY_ALIPAY_SERVER_URL:https://openapi-sandbox.dl.alipaydev.com/gateway.do}
+    sign-type: RSA2
+
+mybatis-plus:
+  global-config:
+    db-config:
+      logic-delete-field: delFlag
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+aggregation:
+  remote-url: http://127.0.0.1:${server.port}
+  demo-mode:
+    enable: false
+    blacklist:
+      - /api/user-service/passenger/save
+      - /api/user-service/passenger/update
+      - /api/user-service/passenger/remove
+      - /api/user-service/update
+      - /api/user-service/deletion
+
+framework:
+  fastjson:
+    safe-mode: true
+  cache:
+    redis:
+      value-timeout: 50000
+      bloom-filter:
+        user-register:
+          name: user_register_cache_penetration_bloom_filter${unique-name:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  metrics:
+    tags:
+      application: ${spring.application.name}

@@ -1,0 +1,21 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Build output and dependencies
+**/target/
+console-vue/node_modules/
+console-vue/dist/
+
+# IDE and OS files
+.idea/
+*.iml
+.DS_Store
+
+# Logs
+*.log
+
+# JMeter local account data and generated results
+jmeter/*.csv
+jmeter/results/*.jtl

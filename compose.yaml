@@ -1,0 +1,147 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: local12306root
+      MYSQL_DATABASE: index12306
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./sql/12306-springboot.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./resources/data/12306-springboot.sql:/docker-entrypoint-initdb.d/02-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-local12306redis}
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-local12306redis}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  nacos:
+    image: nacos/nacos-server:v2.2.3-slim
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:8848:8848"
+      - "127.0.0.1:9848:9848"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/8848'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:4.9.6
+    platform: linux/amd64
+    command: ["sh", "mqnamesrv"]
+    ports:
+      - "127.0.0.1:9876:9876"
+    restart: unless-stopped
+
+  rocketmq-broker:
+    image: apache/rocketmq:4.9.6
+    platform: linux/amd64
+    user: "0:0"
+    command: ["sh", "mqbroker", "-c", "/home/rocketmq/rocketmq-4.9.6/conf/broker.conf"]
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+      TZ: Asia/Shanghai
+    volumes:
+      - ./docker/rocketmq/broker.conf:/home/rocketmq/rocketmq-4.9.6/conf/broker.conf:ro
+      - rocketmq-data:/home/rocketmq/store
+    depends_on:
+      - rocketmq-namesrv
+    restart: unless-stopped
+
+  aggregation:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        MODULE: services/aggregation-service
+        ARTIFACT: index12306-aggregation-service.jar
+    environment:
+      DATABASE_EMV: docker
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: index12306
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: local12306root
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-local12306redis}
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+      ROCKETMQ_NAME_SERVER: rocketmq-namesrv:9876
+      PAY_ALIPAY_APP_ID: ${PAY_ALIPAY_APP_ID:-}
+      PAY_ALIPAY_PRIVATE_KEY: ${PAY_ALIPAY_PRIVATE_KEY:-}
+      PAY_ALIPAY_PUBLIC_KEY: ${PAY_ALIPAY_PUBLIC_KEY:-}
+      PAY_ALIPAY_NOTIFY_URL: ${PAY_ALIPAY_NOTIFY_URL:-http://localhost:8080/api/pay-service/callback/alipay}
+    ports:
+      - "127.0.0.1:9005:9005"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_healthy
+      rocketmq-broker:
+        condition: service_started
+    restart: on-failure
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        MODULE: services/gateway-service
+        ARTIFACT: index12306-gateway-service.jar
+    environment:
+      SPRING_CLOUD_NACOS_DISCOVERY_SERVER_ADDR: nacos:8848
+    ports:
+      - "127.0.0.1:9000:9000"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      aggregation:
+        condition: service_started
+    restart: on-failure
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  rocketmq-data:
